@@ -85,6 +85,37 @@ Miami          Florida     11         52.17            5
 
 ---
 
+## Key Findings
+
+These are real results from running the queries against the generated dataset:
+
+- **Finance was the highest-sentiment sector** over the 60-day window (avg 0.2260), outperforming Technology (0.1586) despite Tech having 6 companies tracked vs Finance's 3. Telecom ranked last at 0.1415.
+- **Sentiment was predictive of next-day price movement for 16 out of 22 companies.** Companies with avg sentiment above 0.1 were followed by positive price changes the next trading day in the majority of cases. PFE and WMT were notable exceptions — strong sentiment but negative price follow-through.
+- **GM was the most volatile stock** in the dataset (std dev 1.3536), nearly 3x more volatile than the least volatile names. PFE (1.0349) and WMT (0.9383) rounded out the top 3 — both also appeared in the divergence signal, suggesting high volatility may dampen the sentiment-price relationship.
+- **WMT was the only divergence signal** — sentiment improving week over week (0.2251 vs 0.2190 monthly avg) while price was still falling (-0.287% over 7 days). Classic lagging price reaction to improving sentiment.
+
+---
+
+## Query Performance — EXPLAIN Analysis
+
+Query 3 (sentiment → next-day price prediction) is the most expensive query in the file. It joins `sentiment_scores` to `stock_prices` on a date offset across 1,430 rows each. Running `EXPLAIN` confirms the indexes are doing their job:
+
+```
+-> Sort: avg_sentiment DESC
+    -> Aggregate using temporary table
+        -> Nested loop inner join  (cost=728 rows=1430)
+            -> Nested loop inner join  (cost=228 rows=1430)
+                -> Covering index scan on companies using uq_companies_ticker  (cost=2.45 rows=22)
+                -> Index lookup on sentiment_scores using uq_sentiment_date
+                   (company_id = c.id), with index condition: source = 'combined'  (cost=4.05 rows=65)
+            -> Single-row index lookup on stock_prices using uq_stock_date
+               (company_id = c.id, price_date = score_date + interval 1 day)  (cost=0.25 rows=1)
+```
+
+The date-offset join resolves to a **single-row index lookup** on `uq_stock_date (company_id, price_date)` — meaning MySQL finds exactly one row per sentiment record without a full table scan. At scale this query would remain fast as long as that composite index is in place.
+
+---
+
 ## Files
 
 | File | Description |
